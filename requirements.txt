@@ -8,6 +8,6 @@ ema-pytorch
 einops
 dill
 scipy
-timm
+timm==0.5.4
 ftfy
 regex

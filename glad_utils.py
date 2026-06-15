@@ -431,9 +431,10 @@ def gan_backward(latents=None, f_latents=None, image_syn=None, G=None, args=None
 
         gc.collect()
 
-    latents.grad = torch.cat(latents_grad_list)
-    del latents_grad_list
-    if args.layer != -1:
+    if args.layer == -1:
+        latents.grad = torch.cat(latents_grad_list)
+        del latents_grad_list
+    else:
         f_latents.grad = torch.cat(f_latents_grad_list)
         del f_latents_grad_list
 

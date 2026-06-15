@@ -1,0 +1,9 @@
+.python-version
+.venv/
+__pycache__/
+data/
+logged_files/
+networks/__pycache__/
+result/
+stylegan_xl/feature_networks/clip/bpe_simple_vocab_16e6.txt
+wandb/
