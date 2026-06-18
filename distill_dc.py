@@ -84,6 +84,10 @@ def main(args):
             w_dim=512,
             hidden=args.mapper_hidden,
         ).to(args.device)
+        if args.mapper_path is not None:
+            ckpt = torch.load(args.mapper_path, map_location=args.device)
+            mapper.load_state_dict(ckpt["model_state_dict"])
+            print(f"loaded mapper: {args.mapper_path}")
         mapper.eval()
         for p in mapper.parameters():
             p.requires_grad_(False)
