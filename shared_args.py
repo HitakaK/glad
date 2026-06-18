@@ -63,4 +63,8 @@ def add_shared_args():
 
     parser.add_argument('--special_gan', default=None)
 
+    # 20260617 hitaka
+    parser.add_argument("--lowdim", type=int, default=0)
+    parser.add_argument("--mapper_hidden", type=int, default=256)
+
     return parser

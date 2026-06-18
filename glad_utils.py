@@ -106,7 +106,14 @@ def prepare_latents(channel=3, num_classes=10, im_size=(32, 32), zdim=512, G=Non
         else:
             print('initialize synthetic data from random noise')
 
-        latents = latents.detach().to(args.device).requires_grad_(True)
+        if args.lowdim > 0:
+            latents = torch.randn(
+                num_classes * args.ipc,
+                args.lowdim,
+                device=args.device,
+            ).requires_grad_(True)
+        else:
+            latents = latents.detach().to(args.device).requires_grad_(True)
 
         return latents, f_latents, label_syn
 
@@ -143,7 +150,7 @@ def get_eval_lrs(args):
     return eval_pool_dict
 
 
-def eval_loop(latents=None, f_latents=None, label_syn=None, G=None, best_acc={}, best_std={}, testloader=None, model_eval_pool=[], it=0, channel=3, num_classes=10, im_size=(32, 32), args=None):
+def eval_loop(latents=None, f_latents=None, label_syn=None, G=None, best_acc={}, best_std={}, testloader=None, model_eval_pool=[], it=0, channel=3, num_classes=10, im_size=(32, 32), args=None, mapper=None):
     curr_acc_dict = {}
     max_acc_dict = {}
 
@@ -176,7 +183,7 @@ def eval_loop(latents=None, f_latents=None, label_syn=None, G=None, best_acc={},
             if args.space == "wp":
                 with torch.no_grad():
                     image_syn_eval = torch.cat(
-                        [latent_to_im(G, (image_syn_eval_split, f_latents_split), args=args).detach() for
+                        [latent_to_im(G, (image_syn_eval_split, f_latents_split), args=args, mapper=mapper).detach() for
                          image_syn_eval_split, f_latents_split, label_syn_split in
                          zip(torch.split(image_syn_eval, args.sg_batch), torch.split(f_latents, args.sg_batch),
                              torch.split(label_syn, args.sg_batch))])
@@ -302,12 +309,18 @@ def load_sgxl(res, args=None):
     return G, z_dim, w_dim, num_ws
 
 
-def latent_to_im(G, latents, args=None):
+def latent_to_im(G, latents, args=None, mapper=None):
 
     if args.space == "p":
         return latents
 
     mean, std = config.mean, config.std
+
+    # 20260617 hitaka
+    # latents = (w_or_u, f_latents)
+    w_latents = latents[0]
+    if mapper is not None and args.lowdim > 0:
+        w_latents = mapper(w_latents)
 
     if "imagenet" in args.dataset:
         class_map = {i: x for i, x in enumerate(config.img_net_classes)}
@@ -317,9 +330,9 @@ def latent_to_im(G, latents, args=None):
 
         elif args.space == "wp":
             if args.layer is None or args.layer==-1:
-                im = G(latents[0], mode="wp")
+                im = G(w_latents, mode="wp")
             else:
-                im = G(latents[0], latents[1], args.layer, mode="from_f")
+                im = G(w_latents, latents[1], args.layer, mode="from_f")
 
         im = (im + 1) / 2
         im = (im - mean) / std
@@ -329,9 +342,9 @@ def latent_to_im(G, latents, args=None):
             im = latents
         elif args.space == "wp":
             if args.layer is None or args.layer == -1:
-                im = G(latents[0], mode="wp")
+                im = G(w_latents, mode="wp")
             else:
-                im = G(latents[0], latents[1], args.layer, mode="from_f")
+                im = G(w_latents, latents[1], args.layer, mode="from_f")
 
             if args.distributed and False:
                 mean, std = config.mean_1, config.std_1
@@ -342,17 +355,17 @@ def latent_to_im(G, latents, args=None):
     return im
 
 
-def image_logging(latents=None, f_latents=None, label_syn=None, G=None, it=None, save_this_it=None, args=None):
+def image_logging(latents=None, f_latents=None, label_syn=None, G=None, it=None, save_this_it=None, args=None, mapper=None):
     with torch.no_grad():
         image_syn = latents.cuda()
 
         if args.space == "wp":
             with torch.no_grad():
                 if args.layer is None or args.layer == -1:
-                    image_syn = latent_to_im(G, (image_syn.detach(), None), args=args)
+                    image_syn = latent_to_im(G, (image_syn.detach(), None), args=args, mapper=mapper)
                 else:
                     image_syn = torch.cat(
-                        [latent_to_im(G, (image_syn_split.detach(), f_latents_split.detach()), args=args).detach() for
+                        [latent_to_im(G, (image_syn_split.detach(), f_latents_split.detach()), args=args, mapper=mapper).detach() for
                          image_syn_split, f_latents_split, label_syn_split in
                          zip(torch.split(image_syn, args.sg_batch),
                              torch.split(f_latents, args.sg_batch),
@@ -405,7 +418,7 @@ def image_logging(latents=None, f_latents=None, label_syn=None, G=None, it=None,
     del upsampled, grid
 
 
-def gan_backward(latents=None, f_latents=None, image_syn=None, G=None, args=None):
+def gan_backward(latents=None, f_latents=None, image_syn=None, G=None, args=None, mapper=None):
     f_latents.grad = None
     latents_grad_list = []
     f_latents_grad_list = []
@@ -415,7 +428,7 @@ def gan_backward(latents=None, f_latents=None, image_syn=None, G=None, args=None
         latents_detached = latents_split.detach().clone().requires_grad_(True)
         f_latents_detached = f_latents_split.detach().clone().requires_grad_(True)
 
-        syn_images = latent_to_im(G=G, latents=(latents_detached, f_latents_detached), args=args)
+        syn_images = latent_to_im(G=G, latents=(latents_detached, f_latents_detached), args=args, mapper=mapper)
 
         syn_images.backward((dLdx_split,))
 

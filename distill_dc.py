@@ -16,6 +16,9 @@ import wandb
 
 from glad_utils import *
 
+# 20260617 hitaka
+from lowdim_mapper import LowDimMapper
+
 def main(args):
     torch.random.manual_seed(0)
     np.random.seed(0)
@@ -72,6 +75,19 @@ def main(args):
 
     optimizer_img = get_optimizer_img(latents=latents, f_latents=f_latents, G=G, args=args)
 
+    # 20260617 hitaka
+    mapper = None
+    if args.lowdim > 0:
+        mapper = LowDimMapper(
+            u_dim=args.lowdim,
+            num_ws=12,
+            w_dim=512,
+            hidden=args.mapper_hidden,
+        ).to(args.device)
+        mapper.eval()
+        for p in mapper.parameters():
+            p.requires_grad_(False)
+
     criterion = nn.CrossEntropyLoss().to(args.device)
     print('%s training begins' % get_time())
 
@@ -93,12 +109,12 @@ def main(args):
             save_this_it = eval_loop(latents=latents, f_latents=f_latents, label_syn=label_syn, G=G, best_acc=best_acc,
                                      best_std=best_std, testloader=testloader,
                                      model_eval_pool=model_eval_pool, channel=channel, num_classes=num_classes,
-                                     im_size=im_size, it=it, args=args)
+                                     im_size=im_size, it=it, args=args, mapper=mapper)
 
 
         if it > 0 and ((it in eval_it_pool and (save_this_it or it % 1000 == 0)) or (
                 args.save_it is not None and it % args.save_it == 0)):
-            image_logging(latents=latents, f_latents=f_latents, label_syn=label_syn, G=G, it=it, save_this_it=save_this_it, args=args)
+            image_logging(latents=latents, f_latents=f_latents, label_syn=label_syn, G=G, it=it, save_this_it=save_this_it, args=args, mapper=mapper)
 
         ''' Train synthetic data '''
         net = get_network(args.model, channel, num_classes, im_size, depth=args.depth, width=args.width).to(args.device) # get a random model
@@ -132,7 +148,7 @@ def main(args):
 
             if args.space == "wp":
                 with torch.no_grad():
-                    image_syn_w_grad = torch.cat([latent_to_im(G, (syn_image_split, f_latents_split), args) for
+                    image_syn_w_grad = torch.cat([latent_to_im(G, (syn_image_split, f_latents_split), args, mapper) for
                                        syn_image_split, f_latents_split, label_syn_split in
                                        zip(torch.split(latents, args.sg_batch),
                                            torch.split(f_latents, args.sg_batch),
@@ -181,7 +197,7 @@ def main(args):
 
             if args.space == "wp":
                 # this method works in-line and back-props gradients to latents and f_latents
-                gan_backward(latents=latents, f_latents=f_latents, image_syn=image_syn, G=G, args=args)
+                gan_backward(latents=latents, f_latents=f_latents, image_syn=image_syn, G=G, args=args, mapper=mapper)
 
             else:
                 latents.grad = image_syn.grad.detach().clone()
@@ -213,6 +229,11 @@ def main(args):
             print('%s iter = %04d, loss = %.4f' % (get_time(), it, loss_avg))
 
         if it == args.Iteration: # only record the final results
+
+            # 20260616 hitaka
+            print("save latents:", latents.shape, label_syn.shape)
+            torch.save({ "latents": latents.detach().cpu(), "labels": label_syn.detach().cpu(), }, os.path.join( args.save_path, f"latents_{args.dataset}_{args.model}_{args.ipc}ipc.pt"))
+
             data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
             torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_%s_%s_%dipc.pt'%(args.dataset, args.model, args.ipc)))
 
